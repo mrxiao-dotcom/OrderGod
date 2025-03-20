@@ -38,13 +38,6 @@ AUTO_INCREMENT=4
 ;
 
 
--- 修改订单表
-ALTER TABLE `simulation_orders`
-    DROP COLUMN `take_profit_price`,
-    ADD COLUMN `highest_price` DECIMAL(20,4) NULL COMMENT '订单期间最高价格（用于回撤策略）' AFTER `current_stop_loss`,
-    ADD COLUMN `max_floating_profit` DECIMAL(20,2) NULL COMMENT '最大浮动盈利（用于浮盈触发策略）' AFTER `highest_price`,
-    MODIFY COLUMN `close_type` VARCHAR(20) NULL COMMENT '平仓类型：take_profit_fixed-固定价格止盈, take_profit_drawdown-回撤止盈, take_profit_trigger-浮盈触发止盈, take_profit_breakeven-保本止盈, stop_loss-止损, manual-手动' AFTER `realized_profit`;
-
 CREATE TABLE `simulation_orders` (
 	`id` BIGINT(19) NOT NULL AUTO_INCREMENT,
 	`order_id` VARCHAR(36) NOT NULL COMMENT '订单UUID' COLLATE 'utf8mb4_0900_ai_ci',
@@ -75,4 +68,26 @@ COMMENT='模拟交易订单表'
 COLLATE='utf8mb4_0900_ai_ci'
 ENGINE=InnoDB
 AUTO_INCREMENT=8
+;
+
+
+CREATE TABLE `account_risk_monitor` (
+	`id` BIGINT(19) NOT NULL AUTO_INCREMENT,
+	`account_id` BIGINT(19) NOT NULL COMMENT '关联账户ID',
+	`total_equity` DECIMAL(20,2) NULL DEFAULT NULL COMMENT '总权益',
+	`used_margin` DECIMAL(20,2) NULL DEFAULT NULL COMMENT '已用保证金',
+	`available_margin` DECIMAL(20,2) NULL DEFAULT NULL COMMENT '可用保证金',
+	`risk_ratio` DECIMAL(10,4) NULL DEFAULT NULL COMMENT '风险度（总市值/总权益）',
+	`position_count` INT(10) NULL DEFAULT NULL COMMENT '当前持仓数量',
+	`created_at` DATETIME NULL DEFAULT 'CURRENT_TIMESTAMP',
+	`available_risk` DECIMAL(20,2) NULL DEFAULT NULL COMMENT '可用风险金',
+	`used_risk` DECIMAL(20,2) NULL DEFAULT NULL COMMENT '已用风险金',
+	`updated_at` TIMESTAMP NULL DEFAULT 'CURRENT_TIMESTAMP' ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+	PRIMARY KEY (`id`) USING BTREE,
+	INDEX `idx_account_risk_monitor_account_id` (`account_id`) USING BTREE
+)
+COMMENT='账户风险度监控表'
+COLLATE='utf8mb4_0900_ai_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=9
 ;
