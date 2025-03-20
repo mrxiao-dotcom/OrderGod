@@ -1,0 +1,93 @@
+# Visual Studio 临时文件
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code 设置
+.vscode/
+
+# 构建结果
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet 包
+*.nupkg
+# NuGet Symbol 包
+*.snupkg
+# 包文件夹
+[Pp]ackages/
+# NuGet v3 项目.json 文件
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio 缓存文件
+# 文件以 .cache 结尾
+*.[Cc]ache
+# 但要保留目录
+!?*.[Cc]ache/
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# TeamCity
+_TeamCity*
+
+# 测试结果
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# 其他文件
+*.log
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+# SQL Server 文件
+*.mdf
+*.ldf
+*.ndf
+
+# 业务情报项目
+*.rdl.data
+*.bim.layout
+*.bim_*.settings
+*.rptproj.rsuser
+*- [Bb]ackup.rdl
+*- [Bb]ackup ([0-9]).rdl
+*- [Bb]ackup ([0-9][0-9]).rdl
+
+# Microsoft Fakes
+FakesAssemblies/
+
+# 本地历史文件
+.localhistory/
+
+# 备份文件
+*.bak
+*.tmp
+*.swp
+*~
+
+# IDE 特定文件
+.idea/
+*.sln.iml
