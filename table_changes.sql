@@ -59,6 +59,7 @@ CREATE TABLE `simulation_orders` (
 	`close_price` DECIMAL(20,4) NULL DEFAULT NULL COMMENT '平仓价格',
 	`realized_profit` DECIMAL(20,2) NULL DEFAULT NULL COMMENT '已实现盈亏',
 	`close_type` VARCHAR(20) NULL DEFAULT NULL COMMENT '平仓类型：take_profit_fixed-固定价格止盈, take_profit_drawdown-回撤止盈, take_profit_trigger-浮盈触发止盈, take_profit_breakeven-保本止盈, stop_loss-止损, manual-手动' COLLATE 'utf8mb4_0900_ai_ci',
+	`real_profit` DECIMAL(20,2) NULL COMMENT '实盈（止损价与开仓价的盈亏）',
 	PRIMARY KEY (`id`) USING BTREE,
 	UNIQUE INDEX `uk_order_id` (`order_id`) USING BTREE,
 	INDEX `idx_account_status` (`account_id`, `status`) USING BTREE,

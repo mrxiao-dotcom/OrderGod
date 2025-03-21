@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging.Console;
 using System.Linq;
 using Dapper;
 using System.Threading;
+using GateFuturesTicker = Io.Gate.GateApi.Model.FuturesTicker;  // 为 Gate.io 的 FuturesTicker 创建别名
 
 namespace DatabaseConfigDemo;
 
@@ -39,8 +40,7 @@ public partial class MainForm : Form
     private TextBox stopLossPriceTextBox = null!;
     private TextBox takeProfitPriceTextBox = null!;
     private TextBox takeProfitDrawdownTextBox = null!;
-    private TextBox orderPreviewBox = null!;
-    private ComboBox directionComboBox = null!;
+    private TextBox takeProfitAmountTextBox = null!;
 
     // 添加机会区的ListView字段
     private ListView customListView = null!;
@@ -59,12 +59,19 @@ public partial class MainForm : Form
     // 在 MainForm 类的字段声明部分添加
     private TableLayoutPanel referenceLayout = null!;
 
+    // 在 MainForm 类中添加右键菜单相关字段
+    private ContextMenuStrip orderContextMenu = null!;
+    private OrderModel? selectedOrder;
+
     // 将 accountComboBox 改为 AccountComboBox 的属性
     private ComboBox AccountComboBox
     {
         get { return accountComboBox; }
         set { accountComboBox = value; }
     }
+
+    // 添加字段声明
+    private ComboBox directionComboBox = null!;
 
     public MainForm()
     {
@@ -430,6 +437,9 @@ public partial class MainForm : Form
                     MessageBox.Show($"初始化分隔比例失败: {ex.Message}", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             };
+
+            // 在 InitializeComponent 方法中添加订单表格的右键菜单初始化
+            InitializeOrderContextMenu();
         }
         catch (Exception ex)
         {
@@ -495,7 +505,7 @@ public partial class MainForm : Form
     }
 
     // 修改账户选择事件处理方法
-    private async void AccountComboBox_SelectedIndexChanged(object sender, EventArgs e)
+    private async void AccountComboBox_SelectedIndexChanged(object? sender, EventArgs e)
     {
         if (AccountComboBox.SelectedItem is AccountItem selectedAccount)
         {
@@ -590,7 +600,7 @@ public partial class MainForm : Form
                     var completedOrders = completedOrdersTask.Result;
 
                     // 更新参考数据区域
-                    UpdateReferenceData(accountData, riskData);
+                    UpdateReferenceData(accountData);
 
                     // 更新订单表格
                     UpdateOrderGridView(activeOrders);
@@ -630,7 +640,7 @@ public partial class MainForm : Form
                 {
                     if (!IsDisposed)
                     {
-                        UpdateReferenceData(accountData, riskData);
+                        UpdateReferenceData(accountData);
                     }
                 });
             }
@@ -641,45 +651,35 @@ public partial class MainForm : Form
         }
     }
 
-    private void UpdateReferenceData(AccountData accountData, AccountRiskData riskData)
+    private void UpdateReferenceData(AccountData accountData)
     {
         try
         {
-            _logger.Log($"开始更新参考数据：总权益={accountData.TotalEquity}, 初始值={accountData.InitialValue}");
+            // 更新所有参考数据标签
+            UpdateLabelValue("总权益:", $"{accountData.TotalEquity:F2}");
+            UpdateLabelValue("初始值:", $"{accountData.InitialValue:F2}");
+            UpdateLabelValue("总市值:", $"{accountData.TotalValue:F2}");
+            UpdateLabelValue("杠杆率:", $"{accountData.LeverageRatio:F4}");
+            UpdateLabelValue("已用保证金:", $"{accountData.UsedMargin:F2}");
+            UpdateLabelValue("可用保证金:", $"{accountData.AvailableMargin:F2}");
+            UpdateLabelValue("总风险金:", $"{accountData.TotalRisk:F2}");
+            UpdateLabelValue("已用风险:", $"{accountData.UsedRisk:F2}");
+            UpdateLabelValue("可用风险:", $"{accountData.AvailableRisk:F2}");
+            UpdateLabelValue("单笔最大风险:", $"{accountData.MaxSingleRisk:F2}");
+            UpdateLabelValue("建议风险金:", $"{accountData.SuggestedRisk:F2}");
 
-            // 在 TableLayoutPanel 中查找并更新值
-            foreach (Control control in referenceLayout.Controls)
-            {
-                if (control is Label label && label.Tag != null)
-                {
-                    // 获取标签对应的值控件（在标签右边的单元格）
-                    var valueLabel = referenceLayout.GetControlFromPosition(
-                        referenceLayout.GetColumn(label) + 1,
-                        referenceLayout.GetRow(label)
-                    ) as Label;
-
-                    if (valueLabel != null)
-                    {
-                        string value = "0";
-                        switch (label.Text)
-                        {
-                            case "总权益:": value = accountData.TotalEquity.ToString(); break;
-                            case "初始值:": value = accountData.InitialValue.ToString(); break;
-                            case "总市值:": value = accountData.TotalValue.ToString(); break;
-                            case "杠杆率:": value = accountData.LeverageRatio.ToString(); break;
-                            case "已用保证金:": value = accountData.UsedMargin.ToString(); break;
-                            case "可用保证金:": value = accountData.AvailableMargin.ToString(); break;
-                            case "总风险金:": value = riskData.TotalRisk.ToString(); break;
-                            case "可用风险金:": value = riskData.AvailableRisk.ToString(); break;
-                            case "单笔最大风险:": value = riskData.MaxSingleRisk.ToString(); break;
-                            case "建议风险金:": value = riskData.SuggestedRisk.ToString(); break;
-                        }
-                        valueLabel.Text = value;
-                    }
-                }
-            }
-
-            _logger.Log("参考数据更新完成");
+            _logger.Log($"更新参考数据成功: " +
+                       $"总权益={accountData.TotalEquity:F2}, " +
+                       $"初始值={accountData.InitialValue:F2}, " +
+                       $"总市值={accountData.TotalValue:F2}, " +
+                       $"杠杆率={accountData.LeverageRatio:F4}, " +
+                       $"已用保证金={accountData.UsedMargin:F2}, " +
+                       $"可用保证金={accountData.AvailableMargin:F2}, " +
+                       $"总风险金={accountData.TotalRisk:F2}, " +
+                       $"已用风险={accountData.UsedRisk:F2}, " +
+                       $"可用风险={accountData.AvailableRisk:F2}, " +
+                       $"单笔最大风险={accountData.MaxSingleRisk:F2}, " +
+                       $"建议风险金={accountData.SuggestedRisk:F2}");
         }
         catch (Exception ex)
         {
@@ -838,22 +838,50 @@ public partial class MainForm : Form
     {
         try
         {
-            if (decimal.TryParse(entryPriceTextBox.Text, out decimal currentPrice) &&
-                decimal.TryParse(stopLossPercentageTextBox.Text, out decimal stopLossPercentage))
+            // 先获取并验证所有必要的值
+            if (!decimal.TryParse(entryPriceTextBox.Text, out decimal currentPrice))
             {
-                string direction = directionComboBox.SelectedItem?.ToString() ?? "buy";
-                
-                // 更新止损价格
-                decimal stopLossPrice = CalculateStopLossPrice(currentPrice, stopLossPercentage, direction);
-                stopLossPriceTextBox.Text = stopLossPrice.ToString("F4");
-
-                // 更新止盈价格
-                decimal takeProfitPrice = CalculateTakeProfitPrice(currentPrice, direction);
-                takeProfitPriceTextBox.Text = takeProfitPrice.ToString("F4");
-
-                _logger.Log($"方向变更 - 方向：{direction}, 当前价：{currentPrice}, " +
-                           $"止损价：{stopLossPrice}, 止盈价：{takeProfitPrice}");
+                _logger.Log("当前价格无效");
+                return;
             }
+
+            if (!decimal.TryParse(stopLossPercentageTextBox.Text, out decimal stopLossPercentage))
+            {
+                _logger.Log("止损比例无效");
+                return;
+            }
+
+            if (!decimal.TryParse(takeProfitDrawdownTextBox.Text, out decimal takeProfitPercentage))
+            {
+                _logger.Log("止盈比例无效");
+                return;
+            }
+
+            string direction = directionComboBox.SelectedItem?.ToString() ?? "buy";
+            
+            // 更新止损价格
+            decimal stopLossPrice = CalculateStopLossPrice(currentPrice, stopLossPercentage, direction);
+            stopLossPriceTextBox.Text = stopLossPrice.ToString("F4");
+
+            // 更新止盈价格
+            decimal takeProfitPrice = CalculateTakeProfitPrice(currentPrice, direction);
+            takeProfitPriceTextBox.Text = takeProfitPrice.ToString("F4");
+
+            // 更新止损和止盈金额
+            if (decimal.TryParse(totalValueTextBox.Text, out decimal totalValue))
+            {
+                // 计算止损金额
+                decimal stopLossAmount = totalValue * (stopLossPercentage / 100);
+                stopLossAmountTextBox.Text = stopLossAmount.ToString("F2");
+
+                // 计算止盈金额
+                decimal takeProfitAmount = totalValue * (takeProfitPercentage / 100);
+                takeProfitAmountTextBox.Text = takeProfitAmount.ToString("F2");
+            }
+
+            _logger.Log($"方向变更 - 方向：{direction}, 当前价：{currentPrice}, " +
+                       $"止损比例：{stopLossPercentage}%, 止损价：{stopLossPrice}, " +
+                       $"止盈比例：{takeProfitPercentage}%, 止盈价：{takeProfitPrice}");
         }
         catch (Exception ex)
         {
@@ -892,7 +920,8 @@ public partial class MainForm : Form
             stopLossPercentageTextBox,
             stopLossPriceTextBox,
             takeProfitPriceTextBox,
-            takeProfitDrawdownTextBox
+            takeProfitDrawdownTextBox,
+            takeProfitAmountTextBox
         };
 
         foreach (var textBox in numberOnlyTextBoxes)
@@ -906,26 +935,45 @@ public partial class MainForm : Form
     {
         try
         {
-            StringBuilder preview = new StringBuilder();
-            preview.AppendLine("=== 订单预览 ===");
-            preview.AppendLine($"合约: {contractTextBox.Text}");
-            preview.AppendLine($"方向: {directionComboBox.SelectedItem?.ToString()?.ToUpper()}");
-            preview.AppendLine($"开仓价格: {entryPriceTextBox.Text}");
-            preview.AppendLine($"下单手数: {quantityTextBox.Text}");
-            preview.AppendLine($"下单市值: {totalValueTextBox.Text}");
-            preview.AppendLine($"保证金: {marginTextBox.Text}");
-            preview.AppendLine($"杠杆倍数: {leverageTextBox.Text}");
-            preview.AppendLine($"止损价格: {stopLossPriceTextBox.Text}");
-            preview.AppendLine($"止损金额: {stopLossAmountTextBox.Text} 元");
-            preview.AppendLine($"止损比例: {stopLossPercentageTextBox.Text}%");
-            preview.AppendLine($"止盈价格: {takeProfitPriceTextBox.Text}");
-            preview.AppendLine($"止盈回撤: {takeProfitDrawdownTextBox.Text}%");
+            // 确保必要的数据都存在
+            if (string.IsNullOrEmpty(contractTextBox.Text) || 
+                directionComboBox.SelectedItem == null || 
+                !int.TryParse(quantityTextBox.Text, out int quantity) ||
+                !decimal.TryParse(entryPriceTextBox.Text, out decimal entryPrice) ||
+                !decimal.TryParse(stopLossPriceTextBox.Text, out decimal stopLoss))
+            {
+                _logger.Log("订单预览所需数据不完整，跳过更新");
+                return;
+            }
 
-            orderPreviewBox.Text = preview.ToString();
+            // 计算订单相关数值
+            var direction = directionComboBox.SelectedItem.ToString();
+            var leverage = int.Parse(leverageTextBox.Text);
+            var margin = CalculateMargin(entryPrice, quantity, leverage);
+            var risk = Math.Abs(entryPrice - stopLoss) * quantity;
+
+            // 更新预览信息
+            UpdateLabelValue("预计保证金:", $"{margin:F2}");
+            UpdateLabelValue("预计风险:", $"{risk:F2}");
+
+            _logger.Log($"更新订单预览成功: 保证金={margin:F2}, 风险={risk:F2}");
         }
         catch (Exception ex)
         {
             _logger.LogError("更新订单预览失败", ex);
+        }
+    }
+
+    private decimal CalculateMargin(decimal price, int quantity, int leverage)
+    {
+        try
+        {
+            return price * quantity / leverage;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("计算保证金失败", ex);
+            return 0;
         }
     }
 
@@ -1012,143 +1060,163 @@ public partial class MainForm : Form
     }
 
     // 修改行情更新事件处理方法
-    private async void MarketDataService_TickerUpdated(object? sender, Dictionary<string, FuturesTicker> tickers)
+    private void MarketDataService_TickerUpdated(object? sender, Dictionary<string, GateFuturesTicker> tickers)
     {
-        if (IsDisposed) return;
-
-        await this.InvokeAsync(() =>
+        try
         {
-            if (IsDisposed) return;
+            // 更新机会区的行情数据
+            UpdateListViewTickers(customListView, tickers);
+            UpdateListViewTickers(trendLongListView, tickers);
+            UpdateListViewTickers(trendShortListView, tickers);
 
-            _logger.Log($"收到行情更新，合约数量：{tickers.Count}");
-
-            // 更新订单表格中的最新价和浮动盈亏
-            foreach (DataGridViewRow row in activeOrdersGrid.Rows)
+            // 如果选择了账户，则更新订单数据
+            if (AccountComboBox.SelectedItem is AccountItem selectedAccount)
             {
-                try 
+                Task.Run(async () =>
                 {
-                    string contract = row.Cells["Contract"].Value?.ToString() ?? "";
-                    string normalizedContract = NormalizeContractName(contract);
-                    
-                    // 查找匹配的ticker
-                    var matchingTicker = tickers.FirstOrDefault(t => 
-                        NormalizeContractName(t.Key) == normalizedContract);
-
-                    if (matchingTicker.Value != null)
+                    try
                     {
-                        var ticker = matchingTicker.Value;
-                        _logger.Log($"处理订单合约行情：{contract}, 最新价：{ticker.Last}");
-                        
-                        if (decimal.TryParse(ticker.Last, out decimal lastPrice) &&
-                            row.Tag is OrderModel order)
+                        var orders = await _dbService.GetActiveOrdersAsync(long.Parse(selectedAccount.AccountId));
+                        var updatedOrders = new List<OrderModel>();
+
+                        foreach (var order in orders)
                         {
-                            // 更新最新价
-                            row.Cells["LastPrice"].Value = lastPrice.ToString();
+                            string normalizedContract = NormalizeContractName(order.Contract) + "_USDT";
+                            if (!tickers.TryGetValue(normalizedContract, out var ticker))
+                                continue;
 
-                            // 计算浮动盈亏
-                            decimal floatingPnL = CalculateFloatingPnL(
-                                order.Direction,
-                                order.Quantity,
-                                order.EntryPrice,
-                                lastPrice);
-
-                            // 更新浮动盈亏
-                            row.Cells["FloatingPnL"].Value = floatingPnL.ToString();
-
-                            // 根据盈亏设置颜色
-                            row.Cells["FloatingPnL"].Style.ForeColor = floatingPnL switch
-                            {
-                                > 0 => Color.Red,
-                                < 0 => Color.Green,
-                                _ => Color.Black
-                            };
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError("更新订单数据失败", ex);
-                }
-            }
-
-            // 更新机会区的行情显示
-            foreach (var listView in new[] { customListView, trendLongListView, trendShortListView })
-            {
-                foreach (ListViewItem item in listView.Items)
-                {
-                    try 
-                    {
-                        string symbol = item.Text;
-                        string normalizedSymbol = NormalizeContractName(symbol);
-                        
-                        // 查找匹配的ticker
-                        var matchingTicker = tickers.FirstOrDefault(t => 
-                            NormalizeContractName(t.Key) == normalizedSymbol);
-
-                        if (matchingTicker.Value != null)
-                        {
-                            var ticker = matchingTicker.Value;
-                            _logger.Log($"处理机会区行情：{symbol}, 最新价：{ticker.Last}");
+                            if (!decimal.TryParse(ticker.Last, out decimal lastPrice))
+                                continue;
                             
-                            // 更新最新价
-                            item.SubItems[1].Text = ticker.Last;
-
-                            // 更新涨跌幅
-                            if (decimal.TryParse(ticker.ChangePercentage, out decimal changePercentage))
+                            order.LastPrice = lastPrice;
+                            
+                            if (order.Direction == "buy" && 
+                                (order.HighestPrice == null || lastPrice > order.HighestPrice))
                             {
-                                item.SubItems[2].Text = ticker.ChangePercentage + "%";
-                                item.ForeColor = changePercentage switch
-                                {
-                                    > 0 => Color.Red,
-                                    < 0 => Color.Green,
-                                    _ => Color.Black
-                                };
+                                order.HighestPrice = lastPrice;
                             }
 
-                            // 更新24小时成交额
-                            item.SubItems[3].Text = ticker.Volume24h + " USDT";
+                            order.FloatingPnL = CalculateFloatingPnL(
+                                order.Direction, 
+                                order.Quantity, 
+                                order.EntryPrice, 
+                                lastPrice);
+
+                            updatedOrders.Add(order);
                         }
+
+                        if (updatedOrders.Any())
+                        {
+                            await UpdateOrdersAsync(updatedOrders);
+                        }
+
+                        await this.InvokeAsync(() =>
+                        {
+                            if (!IsDisposed)
+                            {
+                                UpdateOrderGridView(orders);
+                            }
+                        });
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError("更新行情数据失败", ex);
                     }
-                }
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("处理行情更新失败", ex);
+        }
+    }
+
+    // 添加更新 ListView 行情数据的方法
+    private void UpdateListViewTickers(ListView listView, Dictionary<string, GateFuturesTicker> tickers)
+    {
+        try
+        {
+            if (listView.InvokeRequired)
+            {
+                listView.Invoke(new Action(() => UpdateListViewTickers(listView, tickers)));
+                return;
             }
 
-            // 如果开仓品种已选择，更新其开仓价格和止损止盈价格
-            if (!string.IsNullOrEmpty(contractTextBox.Text))
+            foreach (ListViewItem item in listView.Items)
             {
-                string normalizedContract = NormalizeContractName(contractTextBox.Text);
-                var matchingTicker = tickers.FirstOrDefault(t => 
-                    NormalizeContractName(t.Key) == normalizedContract);
+                string contract = item.Text;
+                string normalizedContract = NormalizeContractName(contract) + "_USDT";
 
-                if (matchingTicker.Value != null)
+                if (tickers.TryGetValue(normalizedContract, out var ticker))
                 {
-                    // 更新开仓价格
-                    entryPriceTextBox.Text = matchingTicker.Value.Last;
+                    // 更新最新价
+                    item.SubItems[1].Text = ticker.Last;
 
-                    // 计算止损价格和止盈价格
-                    if (decimal.TryParse(matchingTicker.Value.Last, out decimal lastPrice) &&
-                        decimal.TryParse(stopLossPercentageTextBox.Text, out decimal stopLossPercentage))
+                    // 更新涨跌幅
+                    if (decimal.TryParse(ticker.ChangePercentage, out decimal change))
                     {
-                        // 获取交易方向
-                        string direction = directionComboBox.SelectedItem?.ToString() ?? "buy";
-                        
-                        // 计算止损价格
-                        decimal stopLossPrice = CalculateStopLossPrice(lastPrice, stopLossPercentage, direction);
-                        stopLossPriceTextBox.Text = stopLossPrice.ToString("F4");
+                        item.SubItems[2].Text = $"{change:F2}%";
+                        // 设置涨跌幅的颜色
+                        item.SubItems[2].ForeColor = change > 0 ? Color.Red : 
+                                                   change < 0 ? Color.Green : 
+                                                   Color.Black;
+                    }
 
-                        // 计算止盈价格（开仓价格的一倍）
-                        decimal takeProfitPrice = CalculateTakeProfitPrice(lastPrice, direction);
-                        takeProfitPriceTextBox.Text = takeProfitPrice.ToString("F4");
-
-                        _logger.Log($"更新价格 - 合约：{contractTextBox.Text}, 最新价：{lastPrice}, " +
-                                  $"方向：{direction}, 止损价：{stopLossPrice}, 止盈价：{takeProfitPrice}");
+                    // 更新24H量
+                    if (decimal.TryParse(ticker.Volume24h, out decimal volume))  // 使用 Volume24h 替代 Volume
+                    {
+                        item.SubItems[3].Text = $"{volume:N0}";
                     }
                 }
             }
-        });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("更新行情列表失败", ex);
+        }
+    }
+
+    // 修改 UpdateOrdersAsync 方法
+    private async Task UpdateOrdersAsync(List<OrderModel> orders)
+    {
+        try
+        {
+            using var connection = await _dbService.CreateConnectionAsync();
+            using var transaction = connection.BeginTransaction();
+
+            try
+            {
+                foreach (var order in orders)
+                {
+                    var sql = @"
+                        UPDATE simulation_orders 
+                        SET highest_price = @HighestPrice,
+                            last_price = @LastPrice,
+                            floating_pnl = @FloatingPnL
+                        WHERE order_id = @OrderId";
+
+                    await connection.ExecuteAsync(sql, new { 
+                        order.OrderId,
+                        order.HighestPrice,
+                        order.LastPrice,
+                        order.FloatingPnL
+                    }, transaction);
+                }
+
+                transaction.Commit();
+                _logger.Log($"成功更新 {orders.Count} 个订单的最新价格和浮动盈亏");
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("更新订单数据失败", ex);
+            throw;
+        }
     }
 
     // 添加计算止损价格的方法
@@ -1183,26 +1251,48 @@ public partial class MainForm : Form
     }
 
     // 修改止损比例输入框的事件处理
-    private void StopLossPercentageTextBox_TextChanged(object sender, EventArgs e)
+    private void StopLossPercentageTextBox_TextChanged(object? sender, EventArgs e)
     {
         try
         {
-            if (decimal.TryParse(entryPriceTextBox.Text, out decimal currentPrice) &&
-                decimal.TryParse(stopLossPercentageTextBox.Text, out decimal stopLossPercentage))
+            // 先验证止损比例
+            if (!decimal.TryParse(stopLossPercentageTextBox.Text, out decimal stopLossPercentage))
+            {
+                _logger.Log("无效的止损比例");
+                return;
+            }
+
+            // 更新止损金额和止盈金额
+            if (decimal.TryParse(totalValueTextBox.Text, out decimal totalValue) &&
+                decimal.TryParse(takeProfitDrawdownTextBox.Text, out decimal takeProfitPercentage))
+            {
+                // 计算止损金额
+                decimal stopLossAmount = totalValue * (stopLossPercentage / 100);
+                stopLossAmountTextBox.Text = stopLossAmount.ToString("F2");
+
+                // 计算止盈金额
+                decimal takeProfitAmount = totalValue * (takeProfitPercentage / 100);
+                takeProfitAmountTextBox.Text = takeProfitAmount.ToString("F2");
+
+                _logger.Log($"止损比例变更 - 比例：{stopLossPercentage}%, 下单市值：{totalValue}, " +
+                           $"止损金额：{stopLossAmount}, 止盈比例：{takeProfitPercentage}%, " +
+                           $"止盈金额：{takeProfitAmount}");
+            }
+
+            // 更新止损价格
+            if (decimal.TryParse(entryPriceTextBox.Text, out decimal currentPrice))
             {
                 string direction = directionComboBox.SelectedItem?.ToString() ?? "buy";
-                
-                // 更新止损价格
                 decimal stopLossPrice = CalculateStopLossPrice(currentPrice, stopLossPercentage, direction);
                 stopLossPriceTextBox.Text = stopLossPrice.ToString("F4");
 
-                _logger.Log($"止损比例变更 - 比例：{stopLossPercentage}%, 方向：{direction}, " +
-                           $"当前价：{currentPrice}, 止损价：{stopLossPrice}");
+                _logger.Log($"更新止损价格 - 当前价：{currentPrice}, 方向：{direction}, " +
+                           $"止损比例：{stopLossPercentage}%, 止损价：{stopLossPrice}");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError("更新止损价格失败", ex);
+            _logger.LogError("更新止损数据失败", ex);
         }
     }
 
@@ -1220,6 +1310,7 @@ public partial class MainForm : Form
         entryPriceTextBox = new TextBox();
         directionComboBox = new ComboBox
         {
+            Dock = DockStyle.Fill,
             DropDownStyle = ComboBoxStyle.DropDownList
         };
         directionComboBox.Items.AddRange(new string[] { "buy", "sell" });
@@ -1382,7 +1473,7 @@ public partial class MainForm : Form
         var stopLossLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,  // 改为单列
+            ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(2)
         };
@@ -1398,6 +1489,12 @@ public partial class MainForm : Form
         AddLabelAndTextBox(stopLossLayout, "止损比例:", stopLossPercentageTextBox, 1, false);
         AddLabelAndTextBox(stopLossLayout, "止损价格:", stopLossPriceTextBox, 2, false);
 
+        // 添加止损比例变更事件
+        stopLossPercentageTextBox.TextChanged += StopLossPercentageTextBox_TextChanged;
+        
+        // 添加下单市值变更事件处理
+        totalValueTextBox.TextChanged += TotalValueTextBox_TextChanged;
+
         stopLossGroup.Controls.Add(stopLossLayout);
         return stopLossGroup;
     }
@@ -1406,6 +1503,7 @@ public partial class MainForm : Form
     {
         takeProfitPriceTextBox = new TextBox();
         takeProfitDrawdownTextBox = new TextBox { Text = "20" };
+        takeProfitAmountTextBox = new TextBox { ReadOnly = true };  // 新增止盈金额输入框
 
         var takeProfitGroup = new GroupBox
         {
@@ -1418,23 +1516,78 @@ public partial class MainForm : Form
         var takeProfitLayout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,  // 改为单列
-            RowCount = 2,
+            ColumnCount = 1,
+            RowCount = 3,  // 增加一行用于止盈金额
             Padding = new Padding(2)
         };
 
         // 设置行高
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 3; i++)
         {
             takeProfitLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         }
 
         // 添加控件
-        AddLabelAndTextBox(takeProfitLayout, "止盈价格:", takeProfitPriceTextBox, 0, false);
-        AddLabelAndTextBox(takeProfitLayout, "回撤比例:", takeProfitDrawdownTextBox, 1, false);
+        AddLabelAndTextBox(takeProfitLayout, "止盈金额:", takeProfitAmountTextBox, 0, true);  // 新增止盈金额
+        AddLabelAndTextBox(takeProfitLayout, "止盈价格:", takeProfitPriceTextBox, 1, false);
+        AddLabelAndTextBox(takeProfitLayout, "回撤比例:", takeProfitDrawdownTextBox, 2, false);
 
         takeProfitGroup.Controls.Add(takeProfitLayout);
+
+        // 添加止盈比例变更事件处理
+        takeProfitDrawdownTextBox.TextChanged += TakeProfitDrawdownTextBox_TextChanged;
+
         return takeProfitGroup;
+    }
+
+    // 添加止盈比例变更事件处理
+    private void TakeProfitDrawdownTextBox_TextChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (decimal.TryParse(totalValueTextBox.Text, out decimal totalValue) &&
+                decimal.TryParse(takeProfitDrawdownTextBox.Text, out decimal takeProfitPercentage))
+            {
+                // 计算止盈金额
+                decimal takeProfitAmount = totalValue * (takeProfitPercentage / 100);
+                takeProfitAmountTextBox.Text = takeProfitAmount.ToString("F2");
+
+                _logger.Log($"止盈比例变更 - 比例：{takeProfitPercentage}%, " +
+                           $"下单市值：{totalValue}, 止盈金额：{takeProfitAmount}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("更新止盈数据失败", ex);
+        }
+    }
+
+    // 添加下单市值变更事件处理
+    private void TotalValueTextBox_TextChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (decimal.TryParse(totalValueTextBox.Text, out decimal totalValue) &&
+                decimal.TryParse(stopLossPercentageTextBox.Text, out decimal stopLossPercentage) &&
+                decimal.TryParse(takeProfitDrawdownTextBox.Text, out decimal takeProfitPercentage))
+            {
+                // 计算止损金额
+                decimal stopLossAmount = totalValue * (stopLossPercentage / 100);
+                stopLossAmountTextBox.Text = stopLossAmount.ToString("F2");
+
+                // 计算止盈金额（使用止盈比例）
+                decimal takeProfitAmount = totalValue * (takeProfitPercentage / 100);
+                takeProfitAmountTextBox.Text = takeProfitAmount.ToString("F2");
+
+                _logger.Log($"更新止损止盈金额 - 下单市值：{totalValue}, " +
+                           $"止损比例：{stopLossPercentage}%, 止损金额：{stopLossAmount}, " +
+                           $"止盈比例：{takeProfitPercentage}%, 止盈金额：{takeProfitAmount}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("更新止损止盈金额失败", ex);
+        }
     }
 
     private GroupBox CreateOrderPreviewGroup()
@@ -1445,7 +1598,7 @@ public partial class MainForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(5),
             Margin = new Padding(3),
-            Height = 60  // 从80降低到60
+            Height = 60
         };
 
         var orderPreviewLayout = new TableLayoutPanel
@@ -1454,7 +1607,7 @@ public partial class MainForm : Form
             ColumnCount = 6,
             RowCount = 1,
             Padding = new Padding(3),
-            Height = 40  // 从60降低到40
+            Height = 40
         };
 
         // 设置列宽比例
@@ -1466,15 +1619,15 @@ public partial class MainForm : Form
         var previewPanel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 8,   // 增加列数以容纳所有信息
-            RowCount = 1,      // 只使用一行
+            ColumnCount = 10,   // 增加列数以容纳所有信息
+            RowCount = 1,
             AutoScroll = true,
             Margin = new Padding(0)
         };
 
         // 设置预览表格的列宽
         string[] columns = new[] {
-            "合约", "方向", "数量", "价格", "市值", "保证金", "止损", "止盈"
+            "合约", "方向", "数量", "价格", "市值", "保证金", "止损价", "预期止损", "止盈价", "预期止盈"
         };
 
         foreach (var column in columns)
@@ -1498,11 +1651,11 @@ public partial class MainForm : Form
                 AutoSize = false,
                 BorderStyle = BorderStyle.FixedSingle,
                 Margin = new Padding(1),
-                Tag = column  // 用于后续更新值
+                Tag = column
             };
 
             int columnIndex = previewPanel.Controls.Count / 2;
-            previewPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 12.5f));
+            previewPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 10f));  // 每列占10%
             previewPanel.Controls.Add(headerLabel, columnIndex, 0);
             previewPanel.Controls.Add(valueLabel, columnIndex, 1);
         }
@@ -1512,7 +1665,7 @@ public partial class MainForm : Form
         {
             Text = "预览",
             Dock = DockStyle.Fill,
-            Height = 25,  // 从30降低到25
+            Height = 25,
             Font = new Font("Microsoft YaHei", 9),
             BackColor = Color.FromArgb(240, 240, 240),
             FlatStyle = FlatStyle.Flat,
@@ -1525,13 +1678,14 @@ public partial class MainForm : Form
         {
             Text = "确认下单",
             Dock = DockStyle.Fill,
-            Height = 25,  // 从30降低到25
+            Height = 25,
             Font = new Font("Microsoft YaHei", 9, FontStyle.Bold),
             BackColor = Color.FromArgb(0, 122, 204),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Margin = new Padding(3)
         };
+        submitButton.Click += SubmitOrder_Click;
 
         orderPreviewLayout.Controls.Add(previewPanel, 0, 0);
         orderPreviewLayout.Controls.Add(previewButton, 1, 0);
@@ -1571,16 +1725,34 @@ public partial class MainForm : Form
                         case "保证金":
                             value = marginTextBox.Text;
                             break;
-                        case "止损":
+                        case "止损价":
                             value = stopLossPriceTextBox.Text;
                             break;
-                        case "止盈":
+                        case "预期止损":
+                            value = stopLossAmountTextBox.Text + " 元";
+                            break;
+                        case "止盈价":
                             value = takeProfitPriceTextBox.Text;
+                            break;
+                        case "预期止盈":
+                            value = takeProfitAmountTextBox.Text + " 元";
                             break;
                     }
                     label.Text = value;
+
+                    // 为止损和止盈金额添加颜色
+                    if (label.Tag.ToString() == "预期止损" && decimal.TryParse(stopLossAmountTextBox.Text, out decimal stopLoss))
+                    {
+                        label.ForeColor = stopLoss < 0 ? Color.Red : Color.Green;
+                    }
+                    else if (label.Tag.ToString() == "预期止盈" && decimal.TryParse(takeProfitAmountTextBox.Text, out decimal takeProfit))
+                    {
+                        label.ForeColor = takeProfit > 0 ? Color.Red : Color.Green;
+                    }
                 }
             }
+
+            _logger.Log("订单预览更新完成");
         }
         catch (Exception ex)
         {
@@ -1974,17 +2146,23 @@ public partial class MainForm : Form
         base.Dispose(disposing);
     }
 
-    // 添加 UpdateOrderGridView 方法
+    // 修改 UpdateOrderGridView 方法
     private void UpdateOrderGridView(List<OrderModel> orders)
     {
         try
         {
             _logger.Log($"开始更新活跃订单表格，订单数量：{orders.Count}");
             
-            // 确保在UI线程上执行
             if (activeOrdersGrid.InvokeRequired)
             {
                 activeOrdersGrid.Invoke(new Action(() => UpdateOrderGridView(orders)));
+                return;
+            }
+
+            // 如果传入的订单列表为空且表格中已有数据，则保留现有数据
+            if (orders.Count == 0 && activeOrdersGrid.Rows.Count > 0)
+            {
+                _logger.Log("收到空订单列表，保留现有数据");
                 return;
             }
 
@@ -1995,8 +2173,6 @@ public partial class MainForm : Form
             {
                 try
                 {
-                    _logger.Log($"处理订单：{order.Contract}, {order.Direction}, 状态：{order.Status}");
-                    
                     var row = new DataGridViewRow();
                     row.CreateCells(activeOrdersGrid);
                     row.Tag = order;
@@ -2004,13 +2180,24 @@ public partial class MainForm : Form
                     // 设置单元格值
                     row.Cells[0].Value = order.Contract;
                     row.Cells[1].Value = order.Direction;
-                    row.Cells[2].Value = order.Quantity.ToString();
-                    row.Cells[3].Value = order.EntryPrice.ToString("0.0000");
-                    row.Cells[4].Value = order.CurrentStopLoss.ToString("0.0000");
-                    row.Cells[5].Value = order.RealizedProfit?.ToString("0.00") ?? "0.00";
-                    row.Cells[6].Value = "--";  // 最新价
-                    row.Cells[7].Value = "0";   // 浮动盈亏
-                    row.Cells[8].Value = order.OpenTime.ToString("yyyy-MM-dd HH:mm:ss");
+                    row.Cells[2].Value = order.Quantity;
+                    row.Cells[3].Value = order.EntryPrice.ToString();
+                    row.Cells[4].Value = order.CurrentStopLoss?.ToString() ?? "--";
+                    row.Cells[5].Value = order.StopLossAmount?.ToString() ?? "--";
+                    row.Cells[6].Value = order.LastPrice?.ToString() ?? "--";
+                    row.Cells[7].Value = order.FloatingPnL?.ToString() ?? "--";
+                    row.Cells[8].Value = order.OpenTime.ToString();
+
+                    // 设置浮动盈亏的颜色
+                    var floatingPnL = order.FloatingPnL ?? 0;
+                    if (floatingPnL != 0)
+                    {
+                        row.Cells[7].Style.ForeColor = floatingPnL > 0 ? Color.Red : Color.Green;
+                    }
+                    else
+                    {
+                        row.Cells[7].Style.ForeColor = Color.Black;
+                    }
 
                     activeOrdersGrid.Rows.Add(row);
                 }
@@ -2333,6 +2520,683 @@ public partial class MainForm : Form
         {
             _logger.LogError("计算浮动盈亏失败", ex);
             return 0;
+        }
+    }
+
+    // 在 InitializeComponent 方法中添加订单表格的右键菜单初始化
+    private void InitializeOrderContextMenu()
+    {
+        orderContextMenu = new ContextMenuStrip();
+        
+        // 添加菜单项
+        var closePositionItem = new ToolStripMenuItem("平仓");
+        var modifyTakeProfitItem = new ToolStripMenuItem("修改止盈");
+        var modifyStopLossItem = new ToolStripMenuItem("修改止损");
+        var adjustLeverageItem = new ToolStripMenuItem("调节杠杆");
+
+        // 添加事件处理
+        closePositionItem.Click += async (s, e) => await ShowClosePositionDialog();
+        modifyTakeProfitItem.Click += async (s, e) => await ShowModifyTakeProfitDialog();
+        modifyStopLossItem.Click += async (s, e) => await ShowModifyStopLossDialog();
+        adjustLeverageItem.Click += async (s, e) => await ShowAdjustLeverageDialog();
+
+        // 添加到菜单
+        orderContextMenu.Items.AddRange(new ToolStripItem[] 
+        {
+            closePositionItem,
+            modifyTakeProfitItem,
+            modifyStopLossItem,
+            adjustLeverageItem
+        });
+
+        // 为活跃订单表格添加右键菜单事件
+        activeOrdersGrid.CellMouseClick += ActiveOrdersGrid_CellMouseClick;
+    }
+
+    private void ActiveOrdersGrid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right && e.RowIndex >= 0)
+        {
+            activeOrdersGrid.ClearSelection();
+            activeOrdersGrid.Rows[e.RowIndex].Selected = true;
+            
+            // 保存选中的订单
+            selectedOrder = activeOrdersGrid.Rows[e.RowIndex].Tag as OrderModel;
+            
+            // 根据订单状态启用/禁用菜单项
+            if (selectedOrder != null)
+            {
+                var adjustLeverageItem = orderContextMenu.Items[3] as ToolStripMenuItem;
+                if (adjustLeverageItem != null)
+                {
+                    // 只有在盈利时才能调节杠杆
+                    adjustLeverageItem.Enabled = selectedOrder.FloatingPnL > 0;
+                }
+            }
+
+            // 显示右键菜单
+            orderContextMenu.Show(activeOrdersGrid, activeOrdersGrid.PointToClient(Cursor.Position));
+        }
+    }
+
+    // 平仓对话框
+    private async Task ShowClosePositionDialog()
+    {
+        if (selectedOrder == null) return;
+
+        var dialog = new Form
+        {
+            Text = "平仓确认",
+            Size = new Size(300, 200),
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false,
+            MinimizeBox = false
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 4,
+            Padding = new Padding(10)
+        };
+
+        // 添加信息显示
+        AddDialogRow(layout, "合约:", selectedOrder.Contract, 0);
+        AddDialogRow(layout, "开仓价:", selectedOrder.EntryPrice.ToString(), 1);
+        AddDialogRow(layout, "当前价:", selectedOrder.LastPrice.ToString(), 2);
+        AddDialogRow(layout, "预计盈亏:", selectedOrder.FloatingPnL.ToString(), 3);
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = 40,
+            Padding = new Padding(10, 5, 10, 5)
+        };
+
+        var confirmButton = new Button { Text = "确认平仓", Width = 80 };
+        var cancelButton = new Button { Text = "取消", Width = 80 };
+
+        confirmButton.Click += async (s, e) =>
+        {
+            try
+            {
+                await ClosePosition(selectedOrder);
+                dialog.DialogResult = DialogResult.OK;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("平仓失败", ex);
+                MessageBox.Show($"平仓失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        cancelButton.Click += (s, e) => dialog.DialogResult = DialogResult.Cancel;
+
+        buttonPanel.Controls.AddRange(new Control[] { confirmButton, cancelButton });
+
+        dialog.Controls.AddRange(new Control[] { layout, buttonPanel });
+        dialog.ShowDialog(this);  // 移除 await
+    }
+
+    // 修改止盈对话框
+    private async Task ShowModifyTakeProfitDialog()
+    {
+        if (selectedOrder == null) return;
+
+        var dialog = new Form
+        {
+            Text = "修改止盈",
+            Size = new Size(300, 200),
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false,
+            MinimizeBox = false
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 3,
+            Padding = new Padding(10)
+        };
+
+        var takeProfitPriceBox = new TextBox();
+        AddDialogRow(layout, "当前价:", selectedOrder.LastPrice.ToString(), 0);
+        AddDialogRow(layout, "新止盈价:", takeProfitPriceBox, 1);
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = 40,
+            Padding = new Padding(10, 5, 10, 5)
+        };
+
+        var confirmButton = new Button { Text = "确认", Width = 80 };
+        var cancelButton = new Button { Text = "取消", Width = 80 };
+
+        confirmButton.Click += async (s, e) =>
+        {
+            if (decimal.TryParse(takeProfitPriceBox.Text, out decimal newTakeProfit))
+            {
+                try
+                {
+                    await ModifyTakeProfit(selectedOrder, newTakeProfit);
+                    dialog.DialogResult = DialogResult.OK;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("修改止盈失败", ex);
+                    MessageBox.Show($"修改止盈失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                MessageBox.Show("请输入有效的止盈价格", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        cancelButton.Click += (s, e) => dialog.DialogResult = DialogResult.Cancel;
+
+        buttonPanel.Controls.AddRange(new Control[] { confirmButton, cancelButton });
+
+        dialog.Controls.AddRange(new Control[] { layout, buttonPanel });
+        dialog.ShowDialog(this);  // 移除 await
+    }
+
+    // 修改止损对话框
+    private async Task ShowModifyStopLossDialog()
+    {
+        if (selectedOrder == null) return;
+
+        var dialog = new Form
+        {
+            Text = "修改止损",
+            Size = new Size(300, 200),
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false,
+            MinimizeBox = false
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 3,
+            Padding = new Padding(10)
+        };
+
+        var stopLossPriceBox = new TextBox();
+        AddDialogRow(layout, "当前价:", selectedOrder.LastPrice.ToString(), 0);
+        AddDialogRow(layout, "新止损价:", stopLossPriceBox, 1);
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = 40,
+            Padding = new Padding(10, 5, 10, 5)
+        };
+
+        var confirmButton = new Button { Text = "确认", Width = 80 };
+        var cancelButton = new Button { Text = "取消", Width = 80 };
+
+        confirmButton.Click += async (s, e) =>
+        {
+            if (decimal.TryParse(stopLossPriceBox.Text, out decimal newStopLoss))
+            {
+                try
+                {
+                    await ModifyStopLoss(selectedOrder, newStopLoss);
+                    dialog.DialogResult = DialogResult.OK;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("修改止损失败", ex);
+                    MessageBox.Show($"修改止损失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                MessageBox.Show("请输入有效的止损价格", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        cancelButton.Click += (s, e) => dialog.DialogResult = DialogResult.Cancel;
+
+        buttonPanel.Controls.AddRange(new Control[] { confirmButton, cancelButton });
+
+        dialog.Controls.AddRange(new Control[] { layout, buttonPanel });
+        dialog.ShowDialog(this);
+    }
+
+    // 调节杠杆对话框
+    private async Task ShowAdjustLeverageDialog()
+    {
+        if (selectedOrder == null || selectedOrder.FloatingPnL <= 0) return;
+
+        var dialog = new Form
+        {
+            Text = "调节杠杆",
+            Size = new Size(300, 200),
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false,
+            MinimizeBox = false
+        };
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 3,
+            Padding = new Padding(10)
+        };
+
+        var leverageBox = new TextBox { Text = selectedOrder.Leverage.ToString() };
+        AddDialogRow(layout, "当前杠杆:", selectedOrder.Leverage.ToString(), 0);
+        AddDialogRow(layout, "新杠杆:", leverageBox, 1);
+
+        var buttonPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = 40,
+            Padding = new Padding(10, 5, 10, 5)
+        };
+
+        var confirmButton = new Button { Text = "确认", Width = 80 };
+        var cancelButton = new Button { Text = "取消", Width = 80 };
+
+        confirmButton.Click += async (s, e) =>
+        {
+            if (int.TryParse(leverageBox.Text, out int newLeverage))
+            {
+                try
+                {
+                    await AdjustLeverage(selectedOrder, newLeverage);
+                    dialog.DialogResult = DialogResult.OK;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("调节杠杆失败", ex);
+                    MessageBox.Show($"调节杠杆失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                MessageBox.Show("请输入有效的杠杆倍数", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+
+        cancelButton.Click += (s, e) => dialog.DialogResult = DialogResult.Cancel;
+
+        buttonPanel.Controls.AddRange(new Control[] { confirmButton, cancelButton });
+
+        dialog.Controls.AddRange(new Control[] { layout, buttonPanel });
+        dialog.ShowDialog(this);  // 移除 await
+    }
+
+    // 辅助方法：添加对话框行
+    private void AddDialogRow(TableLayoutPanel layout, string label, string value, int row)
+    {
+        layout.Controls.Add(new Label { Text = label, TextAlign = ContentAlignment.MiddleRight }, 0, row);
+        layout.Controls.Add(new Label { Text = value, TextAlign = ContentAlignment.MiddleLeft }, 1, row);
+    }
+
+    private void AddDialogRow(TableLayoutPanel layout, string label, Control control, int row)
+    {
+        layout.Controls.Add(new Label { Text = label, TextAlign = ContentAlignment.MiddleRight }, 0, row);
+        layout.Controls.Add(control, 1, row);
+    }
+
+    // 平仓操作
+    private async Task ClosePosition(OrderModel order)
+    {
+        try
+        {
+            using var connection = await _dbService.CreateConnectionAsync();
+            using var transaction = connection.BeginTransaction();
+
+            try
+            {
+                // 1. 更新订单状态
+                var updateOrderSql = @"
+                    UPDATE simulation_orders 
+                    SET status = 'closed', 
+                        close_price = @closePrice,
+                        close_time = @closeTime,
+                        realized_profit = @realizedProfit,
+                        close_type = 'manual'
+                    WHERE order_id = @orderId";
+
+                await connection.ExecuteAsync(updateOrderSql, new
+                {
+                    orderId = order.OrderId,
+                    closePrice = order.LastPrice,
+                    closeTime = DateTime.Now,
+                    realizedProfit = order.FloatingPnL
+                }, transaction);
+
+                // 2. 更新账户风险监控
+                var updateRiskSql = @"
+                    UPDATE account_risk_monitor 
+                    SET used_margin = used_margin - @margin,
+                        available_margin = available_margin + @margin,
+                        used_risk = used_risk - @risk,
+                        available_risk = available_risk + @risk
+                    WHERE account_id = @accountId";
+
+                await connection.ExecuteAsync(updateRiskSql, new
+                {
+                    accountId = order.AccountId,  // 已经是 long 类型，无需转换
+                    margin = order.Margin,
+                    risk = order.RiskAmount
+                }, transaction);
+
+                transaction.Commit();
+                _logger.Log($"订单 {order.OrderId} 平仓成功");
+
+                // 刷新数据
+                await RefreshDataAsync(order.AccountId.ToString());
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("平仓失败", ex);
+            throw;
+        }
+    }
+
+    // 修改止盈
+    private async Task ModifyTakeProfit(OrderModel order, decimal newTakeProfit)
+    {
+        try
+        {
+            var sql = @"
+                UPDATE take_profit_strategies 
+                SET take_profit_price = @takeProfitPrice,
+                    update_time = @updateTime
+                WHERE order_id = @orderId";
+
+            await _dbService.ExecuteAsync(sql, new
+            {
+                orderId = order.OrderId,
+                takeProfitPrice = newTakeProfit,
+                updateTime = DateTime.Now
+            });
+
+            _logger.Log($"订单 {order.OrderId} 修改止盈价格为 {newTakeProfit} 成功");
+
+            // 刷新数据
+            if (AccountComboBox.SelectedItem is AccountItem selectedAccount)
+            {
+                await RefreshDataAsync(selectedAccount.AccountId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("修改止盈失败", ex);
+            throw;
+        }
+    }
+
+    // 修改止损
+    private async Task ModifyStopLoss(OrderModel order, decimal newStopLoss)
+    {
+        try
+        {
+            var sql = @"
+                UPDATE simulation_orders 
+                SET current_stop_loss = @stopLoss
+                WHERE order_id = @orderId";
+
+            await _dbService.ExecuteAsync(sql, new
+            {
+                orderId = order.OrderId,
+                stopLoss = newStopLoss
+            });
+
+            _logger.Log($"订单 {order.OrderId} 修改止损价格为 {newStopLoss} 成功");
+
+            // 刷新数据
+            await RefreshDataAsync(order.AccountId.ToString());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("修改止损失败", ex);
+            throw;
+        }
+    }
+
+    // 调节杠杆
+    private async Task AdjustLeverage(OrderModel order, int newLeverage)
+    {
+        if (order.FloatingPnL <= 0)
+        {
+            throw new InvalidOperationException("只有在盈利时才能调整杠杆");
+        }
+
+        try
+        {
+            var sql = @"
+                UPDATE simulation_orders 
+                SET leverage = @leverage
+                WHERE order_id = @orderId";
+
+            await _dbService.ExecuteAsync(sql, new
+            {
+                orderId = order.OrderId,
+                leverage = newLeverage
+            });
+
+            _logger.Log($"订单 {order.OrderId} 修改杠杆为 {newLeverage} 成功");
+
+            // 刷新数据
+            await RefreshDataAsync(order.AccountId.ToString());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("调节杠杆失败", ex);
+            throw;
+        }
+    }
+
+    // 添加下单事件处理方法
+    private async void SubmitOrder_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            // 验证必要的输入
+            if (!ValidateOrderInput(out string errorMessage))
+            {
+                MessageBox.Show(errorMessage, "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (AccountComboBox.SelectedItem is not AccountItem selectedAccount)
+            {
+                MessageBox.Show("请选择账户", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // 构建订单数据
+            var order = new OrderModel
+            {
+                OrderId = Guid.NewGuid().ToString(),
+                AccountId = long.Parse(selectedAccount.AccountId),
+                Contract = contractTextBox.Text,
+                Direction = directionComboBox.SelectedItem?.ToString() ?? "buy",
+                Quantity = int.Parse(quantityTextBox.Text),
+                EntryPrice = decimal.Parse(entryPriceTextBox.Text),
+                InitialStopLoss = decimal.Parse(stopLossPriceTextBox.Text),
+                CurrentStopLoss = decimal.Parse(stopLossPriceTextBox.Text),
+                Leverage = int.Parse(leverageTextBox.Text),
+                Margin = decimal.Parse(marginTextBox.Text),
+                TotalValue = decimal.Parse(totalValueTextBox.Text),
+                Status = "open",
+                OpenTime = DateTime.Now
+            };
+
+            // 构建止盈策略数据
+            var takeProfitStrategies = new List<TakeProfitStrategy>();
+
+            // 如果设置了固定价格止盈
+            if (decimal.TryParse(takeProfitPriceTextBox.Text, out decimal takeProfitPrice))
+            {
+                takeProfitStrategies.Add(new TakeProfitStrategy
+                {
+                    OrderId = order.OrderId,
+                    StrategyType = "fixed_price",
+                    TriggerPrice = takeProfitPrice,
+                    Status = "active"
+                });
+            }
+
+            // 如果设置了回撤止盈
+            if (decimal.TryParse(takeProfitDrawdownTextBox.Text, out decimal drawdownPercentage))
+            {
+                takeProfitStrategies.Add(new TakeProfitStrategy
+                {
+                    OrderId = order.OrderId,
+                    StrategyType = "drawdown",
+                    DrawdownPercentage = drawdownPercentage,
+                    Status = "active"
+                });
+            }
+
+            // 执行下单操作
+            await PlaceOrderAsync(order, takeProfitStrategies);
+
+            _logger.Log($"下单成功：{order.Contract}, {order.Direction}, 数量：{order.Quantity}");
+            MessageBox.Show("下单成功！", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            // 刷新数据
+            await RefreshDataAsync(selectedAccount.AccountId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("下单失败", ex);
+            MessageBox.Show($"下单失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private bool ValidateOrderInput(out string errorMessage)
+    {
+        errorMessage = string.Empty;
+
+        if (string.IsNullOrEmpty(contractTextBox.Text))
+        {
+            errorMessage = "请选择合约";
+            return false;
+        }
+
+        if (directionComboBox.SelectedItem == null)
+        {
+            errorMessage = "请选择交易方向";
+            return false;
+        }
+
+        if (!int.TryParse(quantityTextBox.Text, out _))
+        {
+            errorMessage = "请输入有效的数量";
+            return false;
+        }
+
+        if (!decimal.TryParse(entryPriceTextBox.Text, out _))
+        {
+            errorMessage = "请输入有效的开仓价格";
+            return false;
+        }
+
+        if (!decimal.TryParse(stopLossPriceTextBox.Text, out _))
+        {
+            errorMessage = "请输入有效的止损价格";
+            return false;
+        }
+
+        if (!decimal.TryParse(marginTextBox.Text, out _))
+        {
+            errorMessage = "请输入有效的保证金";
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task PlaceOrderAsync(OrderModel order, List<TakeProfitStrategy> takeProfitStrategies)
+    {
+        using var connection = await _dbService.CreateConnectionAsync();
+        using var transaction = connection.BeginTransaction();
+
+        try
+        {
+            // 1. 插入订单记录
+            var insertOrderSql = @"
+                INSERT INTO simulation_orders (
+                    order_id, account_id, contract, direction, quantity, 
+                    entry_price, initial_stop_loss, current_stop_loss,
+                    leverage, margin, total_value, status, open_time
+                ) VALUES (
+                    @OrderId, @AccountId, @Contract, @Direction, @Quantity,
+                    @EntryPrice, @InitialStopLoss, @CurrentStopLoss,
+                    @Leverage, @Margin, @TotalValue, @Status, @OpenTime
+                )";
+
+            await connection.ExecuteAsync(insertOrderSql, order, transaction);
+
+            // 2. 更新账户风险监控
+            var updateRiskSql = @"
+                UPDATE account_risk_monitor 
+                SET used_margin = used_margin + @Margin,
+                    available_margin = available_margin - @Margin,
+                    used_risk = used_risk + @Risk,
+                    available_risk = available_risk - @Risk
+                WHERE account_id = @AccountId";
+
+            // 修改这里：确保 InitialStopLoss 有值，如果没有则使用默认值
+            decimal stopLossPrice = order.InitialStopLoss ?? order.EntryPrice;
+            decimal riskAmount = Math.Abs(order.EntryPrice - stopLossPrice) * order.Quantity;
+
+            await connection.ExecuteAsync(updateRiskSql, new
+            {
+                order.AccountId,
+                order.Margin,
+                Risk = riskAmount
+            }, transaction);
+
+            // 3. 插入止盈策略记录
+            if (takeProfitStrategies.Any())
+            {
+                var insertStrategySql = @"
+                    INSERT INTO take_profit_strategies (
+                        order_id, strategy_type, trigger_price, drawdown_percentage, status
+                    ) VALUES (
+                        @OrderId, @StrategyType, @TriggerPrice, @DrawdownPercentage, @Status
+                    )";
+
+                foreach (var strategy in takeProfitStrategies)
+                {
+                    await connection.ExecuteAsync(insertStrategySql, strategy, transaction);
+                }
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
         }
     }
 }

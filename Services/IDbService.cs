@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using DatabaseConfigDemo.Models;
+using System.Data;
 
 namespace DatabaseConfigDemo.Services;
 
@@ -14,4 +15,6 @@ public interface IDbService
     Task<bool> TestConnectionAsync();
     Task<AccountData> GetAccountDataAsync(long accountId);
     Task<AccountRiskData> GetAccountRiskDataAsync(long accountId);
+    Task<IDbConnection> CreateConnectionAsync();
+    Task<int> ExecuteAsync(string sql, object param);
 } 

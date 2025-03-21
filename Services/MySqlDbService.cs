@@ -5,6 +5,7 @@ using Dapper;
 using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Text.Json;
 
 namespace DatabaseConfigDemo.Services;
 
@@ -52,9 +53,6 @@ public class MySqlDbService : IDbService
     {
         try
         {
-            using var connection = new MySqlConnection(_connectionString);
-            await connection.OpenAsync();
-
             var sql = @"
                 SELECT 
                     id,
@@ -72,6 +70,7 @@ public class MySqlDbService : IDbService
                     margin as Margin,
                     total_value as TotalValue,
                     realized_profit as RealizedProfit,
+                    real_profit as RealProfit,
                     status as Status,
                     open_time as OpenTime,
                     close_time as CloseTime,
@@ -82,12 +81,9 @@ public class MySqlDbService : IDbService
                 AND status = 'open'
                 ORDER BY open_time DESC";
 
-            _logger.Log($"执行查询活跃订单SQL: accountId = {accountId}");
+            using var connection = await CreateConnectionAsync();
             var orders = await connection.QueryAsync<OrderModel>(sql, new { accountId });
-            var orderList = orders.ToList();
-            _logger.Log($"查询到 {orderList.Count} 个活跃订单");
-            
-            return orderList;
+            return orders.ToList();
         }
         catch (Exception ex)
         {
@@ -224,46 +220,63 @@ public class MySqlDbService : IDbService
     {
         try
         {
-            using var connection = new MySqlConnection(_connectionString);
-            await connection.OpenAsync();
-
             var sql = @"
                 SELECT 
-                    a.equity as TotalEquity,
-                    a.init_value as InitialValue,
-                    COALESCE(SUM(so.margin), 0) as UsedMargin,
-                    arm.risk_ratio as LeverageRatio,
-                    COALESCE(SUM(so.total_value), 0) as TotalValue
+                    a.id,
+                    a.name as AccountName,
+                    COALESCE(arm.total_equity, 0) as TotalEquity,
+                    COALESCE(a.init_value, 0) as InitialValue,
+                    COALESCE((
+                        SELECT SUM(total_value)
+                        FROM simulation_orders
+                        WHERE account_id = a.id AND status = 'open'
+                    ), 0) as TotalValue,
+                    COALESCE(arm.used_margin, 0) as UsedMargin,
+                    COALESCE(arm.available_margin, 0) as AvailableMargin,
+                    COALESCE(a.max_total_risk, 0) as TotalRisk,
+                    COALESCE(arm.used_risk, 0) as UsedRisk,
+                    COALESCE(arm.available_risk, 0) as AvailableRisk,
+                    COALESCE(a.single_order_risk, 0) as MaxSingleRisk
                 FROM accounts a
-                LEFT JOIN simulation_orders so ON a.id = so.account_id AND so.status = 'open'
-                LEFT JOIN account_risk_monitor arm ON a.id = arm.account_id
-                WHERE a.id = @accountId
-                GROUP BY a.id, a.equity, a.init_value, arm.risk_ratio";
+                LEFT JOIN account_risk_monitor arm ON arm.account_id = a.id
+                WHERE a.id = @accountId";
 
-            _logger.Log($"执行账户数据查询SQL: accountId = {accountId}");
+            using var connection = await CreateConnectionAsync();
+            var result = await connection.QueryFirstOrDefaultAsync<AccountData>(sql, new { accountId })
+                ?? new AccountData();
 
-            var accountData = await connection.QueryFirstOrDefaultAsync<AccountData>(sql, new { accountId });
-            
-            if (accountData != null)
+            if (result == null)
             {
-                _logger.Log($"查询到账户数据：总权益={accountData.TotalEquity}, 初始值={accountData.InitialValue}, " +
-                           $"已用保证金={accountData.UsedMargin}, 杠杆率={accountData.LeverageRatio}, " +
-                           $"总市值={accountData.TotalValue}");
-
-                // 计算可用保证金 = 总权益 - 已用保证金
-                accountData.AvailableMargin = accountData.TotalEquity - accountData.UsedMargin;
-                return accountData;
-            }
-            else
-            {
-                var ex = new Exception($"未找到账户 {accountId} 的数据");
-                _logger.LogError($"未找到账户 {accountId} 的数据", ex);
+                _logger.Log($"未找到账户数据，账户ID：{accountId}");
                 return new AccountData();
             }
+
+            // 计算杠杆率 = 总市值/总权益
+            result.LeverageRatio = result.TotalEquity > 0 ? 
+                Math.Round(result.TotalValue / result.TotalEquity, 4) : 0;
+
+            // 建议风险金默认等于单笔最大风险
+            result.SuggestedRisk = result.MaxSingleRisk;
+
+            _logger.Log($"获取账户数据成功：\n" +
+                       $"账户={result.AccountName}\n" +
+                       $"总权益={result.TotalEquity:F2}\n" +
+                       $"初始值={result.InitialValue:F2}\n" +
+                       $"总市值={result.TotalValue:F2}\n" +
+                       $"杠杆率={result.LeverageRatio:F4}\n" +
+                       $"已用保证金={result.UsedMargin:F2}\n" +
+                       $"可用保证金={result.AvailableMargin:F2}\n" +
+                       $"总风险金={result.TotalRisk:F2}\n" +
+                       $"已用风险={result.UsedRisk:F2}\n" +
+                       $"可用风险={result.AvailableRisk:F2}\n" +
+                       $"单笔最大风险={result.MaxSingleRisk:F2}\n" +
+                       $"建议风险金={result.SuggestedRisk:F2}");
+
+            return result;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"获取账户 {accountId} 数据失败", ex);
+            _logger.LogError("获取账户数据失败", ex);
             throw;
         }
     }
@@ -272,31 +285,32 @@ public class MySqlDbService : IDbService
     {
         try
         {
-            using var connection = new MySqlConnection(_connectionString);
-            await connection.OpenAsync();
-
             var sql = @"
                 SELECT 
-                    used_risk as TotalRisk,
-                    available_risk as AvailableRisk,
-                    a.single_order_risk as MaxSingleRisk,
-                    a.max_total_risk as SuggestedRisk
-                FROM account_risk_monitor arm
-                JOIN accounts a ON a.id = arm.account_id 
-                WHERE arm.account_id = @accountId";
+                    COALESCE(arm.used_risk, 0) as used_risk,
+                    COALESCE(arm.available_risk, 0) as available_risk
+                FROM accounts a
+                LEFT JOIN account_risk_monitor arm ON arm.account_id = a.id
+                WHERE a.id = @accountId";
 
+            using var connection = await CreateConnectionAsync();
             var result = await connection.QueryFirstOrDefaultAsync<AccountRiskData>(sql, new { accountId });
+
             if (result == null)
             {
-                var ex = new Exception($"未找到账户 {accountId} 的风险数据");
-                _logger.LogError($"未找到账户 {accountId} 的风险数据", ex);
+                _logger.Log($"未找到账户风险数据，账户ID：{accountId}");
                 return new AccountRiskData();
             }
+
+            _logger.Log($"获取账户风险数据成功：\n" +
+                       $"已用风险={result.used_risk:F2}\n" +
+                       $"可用风险={result.available_risk:F2}");
+
             return result;
         }
         catch (Exception ex)
         {
-            _logger.LogError($"获取账户 {accountId} 风险数据失败", ex);
+            _logger.LogError("获取账户风险数据失败", ex);
             throw;
         }
     }
@@ -326,5 +340,18 @@ public class MySqlDbService : IDbService
             RealizedProfit = reader.IsDBNull("realized_profit") ? 0m : reader.GetDecimal("realized_profit"),
             CloseType = reader.IsDBNull("close_type") ? "" : reader.GetString("close_type")
         };
+    }
+
+    public async Task<IDbConnection> CreateConnectionAsync()
+    {
+        var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync();
+        return connection;
+    }
+
+    public async Task<int> ExecuteAsync(string sql, object param)
+    {
+        using var connection = await CreateConnectionAsync();
+        return await connection.ExecuteAsync(sql, param);
     }
 } 

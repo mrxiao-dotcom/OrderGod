@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using Io.Gate.GateApi.Api;
 using Io.Gate.GateApi.Client;
-using Io.Gate.GateApi.Model;
-using DatabaseConfigDemo.Models;  // 添加命名空间引用
+using DatabaseConfigDemo.Models;
 
 namespace DatabaseConfigDemo.Services;
 
@@ -10,12 +9,12 @@ public class MarketDataService
 {
     private readonly ILogger _logger;
     private readonly Configuration _gateConfig;
-    private readonly ConcurrentDictionary<string, FuturesTicker> _tickerCache;
+    private readonly ConcurrentDictionary<string, Models.FuturesTicker> _tickerCache;
     private readonly CancellationTokenSource _cancellationTokenSource;
     private readonly FuturesApi _futuresApi;
     private readonly HashSet<string> _subscribedSymbols;
     
-    public event EventHandler<Dictionary<string, FuturesTicker>>? TickerUpdated;
+    public event EventHandler<Dictionary<string, Models.FuturesTicker>>? TickerUpdated;
 
     public MarketDataService(string apiEndpoint, ILogger logger)
     {
@@ -33,7 +32,7 @@ public class MarketDataService
         };
 
         _futuresApi = new FuturesApi(_gateConfig);
-        _tickerCache = new ConcurrentDictionary<string, FuturesTicker>();
+        _tickerCache = new ConcurrentDictionary<string, Models.FuturesTicker>();
         _cancellationTokenSource = new CancellationTokenSource();
         
         // 修改为正确的永续合约格式
@@ -55,42 +54,45 @@ public class MarketDataService
             try
             {
                 _logger.Log("开始批量获取永续合约行情数据...");
+                var updatedTickers = new Dictionary<string, Models.FuturesTicker>();
 
-                // 使用 List<FuturesTicker> 存储所有获取到的行情数据
-                var allTickers = new List<FuturesTicker>();
-                
-                // 逐个获取每个合约的行情数据
                 foreach (var symbol in _subscribedSymbols)
                 {
                     try
                     {
                         _logger.Log($"正在获取 {symbol} 的行情数据...");
-                        var tickers = await Task.Run(() => _futuresApi.ListFuturesTickers("usdt", symbol));
-                        if (tickers != null && tickers.Any())
+                        var gateTickers = await Task.Run(() => _futuresApi.ListFuturesTickers("usdt", symbol));
+                        
+                        if (gateTickers != null && gateTickers.Any())
                         {
-                            allTickers.AddRange(tickers);
-                            _logger.Log($"成功获取 {symbol} 的行情数据");
+                            foreach (var gateTicker in gateTickers)
+                            {
+                                if (gateTicker != null && !string.IsNullOrEmpty(gateTicker.Contract))
+                                {
+                                    // 转换为本地 FuturesTicker
+                                    var localTicker = new Models.FuturesTicker
+                                    {
+                                        Symbol = gateTicker.Contract,
+                                        Contract = gateTicker.Contract,
+                                        LastPrice = decimal.Parse(gateTicker.Last),
+                                        ChangePercentage = decimal.Parse(gateTicker.ChangePercentage),
+                                        Volume24H = decimal.Parse(gateTicker.Volume24h)
+                                    };
+
+                                    // 转换为显示格式
+                                    var displaySymbol = gateTicker.Contract.Replace("_", "/");
+                                    _tickerCache[displaySymbol] = localTicker;
+                                    updatedTickers[displaySymbol] = localTicker;
+
+                                    _logger.Log($"更新行情: {displaySymbol} - 最新价: {gateTicker.Last}, 涨跌幅: {gateTicker.ChangePercentage}%");
+                                }
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError($"获取 {symbol} 行情数据失败", ex);
-                        continue;  // 继续获取下一个合约的数据
-                    }
-                }
-
-                // 处理获取到的行情数据
-                var updatedTickers = new Dictionary<string, FuturesTicker>();
-                foreach (var ticker in allTickers)
-                {
-                    if (ticker != null && !string.IsNullOrEmpty(ticker.Contract))
-                    {
-                        // 转换为显示格式
-                        var displaySymbol = ticker.Contract.Replace("_", "/");
-                        _tickerCache[displaySymbol] = ticker;
-                        updatedTickers[displaySymbol] = ticker;
-                        
-                        _logger.Log($"更新行情: {displaySymbol} - 最新价: {ticker.Last}, 涨跌幅: {ticker.ChangePercentage}%");
+                        continue;
                     }
                 }
 
@@ -134,7 +136,7 @@ public class MarketDataService
         _cancellationTokenSource.Cancel();
     }
 
-    public FuturesTicker? GetTicker(string symbol)
+    public Models.FuturesTicker? GetTicker(string symbol)
     {
         _tickerCache.TryGetValue(symbol, out var ticker);
         return ticker;
