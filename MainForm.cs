@@ -554,39 +554,39 @@ public partial class MainForm : Form
         {
             _logger.Log($"正在刷新账户 {accountId} 的数据...");
 
-            // 并行获取账户数据、风险数据和订单数据
-            var accountDataTask = Task.Run(async () =>
+            // 并行获取所有数据
+            var tasks = new[]
             {
-                if (long.TryParse(accountId, out long accId))
+                Task.Run(async () =>
                 {
-                    return await _dbService.GetAccountDataAsync(accId);
-                }
-                return new AccountData();
-            }, ct);
+                    if (long.TryParse(accountId, out long accId))
+                    {
+                        return await _dbService.GetAccountDataAsync(accId);
+                    }
+                    return new AccountData();
+                }, ct),
 
-            var riskDataTask = Task.Run(async () =>
-            {
-                if (long.TryParse(accountId, out long accId))
+                Task.Run(async () =>
                 {
-                    return await _dbService.GetAccountRiskDataAsync(accId);
-                }
-                return new AccountRiskData();
-            }, ct);
+                    if (long.TryParse(accountId, out long accId))
+                    {
+                        return await _dbService.GetAccountRiskDataAsync(accId);
+                    }
+                    return new AccountRiskData();
+                }, ct),
 
-            // 修改这里：同时获取活跃订单和已完成订单
-            var activeOrdersTask = Task.Run(async () =>
-            {
-                return await _orderService.GetActiveOrdersAsync(accountId);
-            }, ct);
+                Task.Run(async () =>
+                {
+                    return await _orderService.GetActiveOrdersAsync(accountId);
+                }, ct),
 
-            var completedOrdersTask = Task.Run(async () =>
-            {
-                return await _orderService.GetCompletedOrdersAsync(accountId);
-            }, ct);
+                Task.Run(async () =>
+                {
+                    return await _orderService.GetCompletedOrdersAsync(accountId);
+                }, ct)
+            };
 
-            // 等待所有任务完成
-            await Task.WhenAll(accountDataTask, riskDataTask, activeOrdersTask, completedOrdersTask);
-
+            await Task.WhenAll(tasks);
             ct.ThrowIfCancellationRequested();
 
             // 在UI线程更新界面
@@ -594,23 +594,25 @@ public partial class MainForm : Form
             {
                 if (!IsDisposed)
                 {
-                    var accountData = accountDataTask.Result;
-                    var riskData = riskDataTask.Result;
-                    var activeOrders = activeOrdersTask.Result;
-                    var completedOrders = completedOrdersTask.Result;
+                    var accountData = tasks[0].Result;
+                    var riskData = tasks[1].Result;
+                    var activeOrders = tasks[2].Result;
+                    var completedOrders = tasks[3].Result;
 
                     // 更新参考数据区域
                     UpdateReferenceData(accountData);
 
                     // 更新订单表格
                     UpdateOrderGridView(activeOrders);
-                    UpdateCompletedOrderGridView(completedOrders);
+                    UpdateCompletedOrderGridView(completedOrders);  // 确保调用这个方法
 
                     // 更新其他UI元素
                     UpdateOtherUIElements();
 
                     // 更新合约订阅
                     InitializeContractSubscription();
+
+                    _logger.Log($"已平仓订单数量：{completedOrders.Count}");
                 }
             });
 
@@ -2311,39 +2313,56 @@ public partial class MainForm : Form
     {
         try
         {
+            if (completedOrdersGrid.InvokeRequired)
+            {
+                completedOrdersGrid.Invoke(new Action(() => UpdateCompletedOrderGridView(orders)));
+                return;
+            }
+
+            completedOrdersGrid.SuspendLayout();
             completedOrdersGrid.Rows.Clear();
+
             foreach (var order in orders)
             {
-                var row = new DataGridViewRow();
-                row.Cells.AddRange(new DataGridViewCell[]
+                try
                 {
-                    new DataGridViewTextBoxCell { Value = order.OrderId },
-                    new DataGridViewTextBoxCell { Value = order.Contract },
-                    new DataGridViewTextBoxCell { Value = order.Direction },
-                    new DataGridViewTextBoxCell { Value = order.Quantity.ToString() },
-                    new DataGridViewTextBoxCell { Value = order.EntryPrice.ToString() },
-                    new DataGridViewTextBoxCell { Value = order.ClosePrice?.ToString() ?? "--" },
-                    new DataGridViewTextBoxCell { Value = order.RealizedProfit?.ToString() ?? "0.00" },
-                    new DataGridViewTextBoxCell { Value = order.CloseTime.ToString() },
-                    new DataGridViewTextBoxCell { Value = order.CloseType }
-                });
+                    var row = new DataGridViewRow();
+                    row.CreateCells(completedOrdersGrid);
+                    row.Tag = order;
 
-                // 根据盈亏设置颜色
-                if (order.RealizedProfit > 0)
-                {
-                    row.Cells[6].Style.ForeColor = Color.Red;
-                }
-                else if (order.RealizedProfit < 0)
-                {
-                    row.Cells[6].Style.ForeColor = Color.Green;
-                }
+                    // 设置单元格值
+                    row.Cells[0].Value = order.OrderId;
+                    row.Cells[1].Value = order.Contract;
+                    row.Cells[2].Value = order.Direction;
+                    row.Cells[3].Value = order.Quantity;
+                    row.Cells[4].Value = order.EntryPrice.ToString();
+                    row.Cells[5].Value = order.ClosePrice?.ToString() ?? "--";
+                    row.Cells[6].Value = order.RealizedProfit?.ToString() ?? "--";
+                    row.Cells[7].Value = order.CloseTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "--";
+                    row.Cells[8].Value = order.CloseType;
 
-                completedOrdersGrid.Rows.Add(row);
+                    // 设置实现盈亏的颜色
+                    if (order.RealizedProfit.HasValue)
+                    {
+                        row.Cells[6].Style.ForeColor = order.RealizedProfit.Value > 0 ? Color.Red : 
+                                                      order.RealizedProfit.Value < 0 ? Color.Green : 
+                                                      Color.Black;
+                    }
+
+                    completedOrdersGrid.Rows.Add(row);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"添加已平仓订单行失败：{ex.Message}", ex);
+                }
             }
+
+            completedOrdersGrid.ResumeLayout();
+            _logger.Log($"已平仓订单表格更新完成，显示 {completedOrdersGrid.Rows.Count} 行");
         }
         catch (Exception ex)
         {
-            _logger.LogError("更新已完成订单表格失败", ex);
+            _logger.LogError($"更新已平仓订单表格失败：{ex.Message}", ex);
         }
     }
 
